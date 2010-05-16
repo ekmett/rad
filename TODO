@@ -1,0 +1,15 @@
+* Implement the diffMF, etc. functionality from Numeric.FAD
+
+* Allow the type to vary within our RAD data type container, in the same fashion as Numeric.FAD.
+
+    Although, while Pearlmutter and Siskind provided the functionality to permit it in derivative combinator, they provided
+    no combinators to convert, for instance, a Dual tag Float to a Dual tag Double, so that extra functionality cannot
+    currently be leveraged.
+
+* Implement a reverse-mode cotangent tower.
+
+    Can we just play back the tape in a forward-mode tower?
+
+* Provide the ability to use reverse mode locally on FAD inputs, i.e.
+
+    reverseCheckpoint :: (forall s. RAD s a -> RAD s a) -> FAD t a -> FAD t a 

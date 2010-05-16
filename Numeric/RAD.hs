@@ -1,39 +1,46 @@
 {-# LANGUAGE Rank2Types, TypeFamilies #-}
-{- |
-   Copyright  : Copyright (C) 2010 Edward Kmett
-                Copyright (C) 2008-2009 Barak A. Pearlmutter and Jeffrey Mark Siskind
-   License    : BSD3
-   Maintainer : ekmett@gmail.com
-   Stability  : experimental
-   Portability: GHC only
-
-Reverse Mode Automatic Differentiation via overloading to perform
-nonstandard interpretation that replaces original numeric type with
-a bundle that contains a value of the original type and the tape that
-will be used to recover the value of the sensitivity.
-
-This package uses StableNames internally to recover sharing information from 
-the tape to avoid combinatorial explosion, and thus runs asymptotically faster
-than it could without such sharing information, but the use of side-effects
-contained herein is benign.
-
-The API has been built to be close to the design of `Numeric.FAD` from the 'fad' package
-by Barak Pearlmutter and Jeffrey Mark Siskind and contains portions of that code, with minor liberties taken.
--}
+-----------------------------------------------------------------------------
+-- |
+-- Module      :  Numeric.RAD
+-- Copyright   :  (c) Edward Kmett 2010
+-- License     :  BSD3
+-- Maintainer  :  ekmett@gmail.com
+-- Stability   :  experimental
+-- Portability :  GHC only 
+--
+-- Reverse Mode Automatic Differentiation via overloading to perform
+-- nonstandard interpretation that replaces original numeric type with
+-- a bundle that contains a value of the original type and the tape that
+-- will be used to recover the value of the sensitivity.
+-- 
+-- This package uses StableNames internally to recover sharing information from 
+-- the tape to avoid combinatorial explosion, and thus runs asymptotically faster
+-- than it could without such sharing information, but the use of side-effects
+-- contained herein is benign.
+--
+-- The API has been built to be close to the design of 'Numeric.FAD' from the 'fad' package
+-- by Barak Pearlmutter and Jeffrey Mark Siskind and contains portions of that code, with minor liberties taken.
+-- 
+-----------------------------------------------------------------------------
 
 module Numeric.RAD 
-    ( RAD
+    ( 
+    -- * First-Order Reverse Mode Automatic Differentiation
+      RAD
     , lift
-    , jacobian
-    , jacobian2
-    , grad
-    , grad2
-    , diff
-    , diff2
+    -- * First-Order Differentiation Operators
     , diffUU
     , diffUF
     , diff2UU
     , diff2UF
+    -- * Common access patterns 
+    , diff
+    , diff2
+    , jacobian
+    , jacobian2
+    , grad
+    , grad2
+    -- * Optimization Routines 
     , zeroNewton
     , inverseNewton
     , fixedPointNewton
@@ -67,6 +74,8 @@ data Tape a t
 instance Show a => Show (RAD s a) where
     showsPrec d = disc1 (showsPrec d)
 
+-- | The 'lift' function injects a primal number into the RAD data type with a 0 derivative.
+-- If reverse-mode AD numbers formed a monad, then 'lift' would be 'return'.
 lift :: a -> RAD s a 
 lift = RAD . C 
 {-# INLINE lift #-}
@@ -108,7 +117,6 @@ unary_ f _ (RAD (C b)) = RAD (C (f b))
 unary_ f g b = RAD (U (disc1 f b) g b)
 {-# INLINE unary_ #-}
 
--- unary_ with argument
 unary :: (a -> a) -> (a -> a) -> RAD s a -> RAD s a
 unary f _ (RAD (C b)) = RAD (C (f b))
 unary f g b = RAD (U (disc1 f b) (disc1 g b) b)
@@ -127,6 +135,18 @@ binary f gb gc b c = RAD (B (f vb vc) (gb vc) (gc vb) b c)
     where vb = primal b; vc = primal c
 {-# INLINE binary #-}
 
+disc1 :: (a -> b) -> RAD s a -> b
+disc1 f x = f (primal x)
+{-# INLINE disc1 #-}
+
+disc2 :: (a -> b -> c) -> RAD s a -> RAD s b -> c
+disc2 f x y = f (primal x) (primal y)
+{-# INLINE disc2 #-}
+
+disc3 :: (a -> b -> c -> d) -> RAD s a -> RAD s b -> RAD s c -> d
+disc3 f x y z = f (primal x) (primal y) (primal z)
+{-# INLINE disc3 #-}
+
 from :: Num a => RAD s a -> a -> RAD s a
 from (RAD (C a)) x = RAD (C x)
 from a x = RAD (U x 1 a)
@@ -135,22 +155,15 @@ fromBy :: Num a => RAD s a -> RAD s a -> Int -> a -> RAD s a
 fromBy (RAD (C a)) _ _ x = RAD (C x)
 fromBy a delta n x = RAD (B x 1 (fromIntegral n) a delta)
 
-disc1 :: (a -> b) -> RAD s a -> b
-disc1 f x = f (primal x)
-
-disc2 :: (a -> b -> c) -> RAD s a -> RAD s b -> c
-disc2 f x y = f (primal x) (primal y)
-
-disc3 :: (a -> b -> c -> d) -> RAD s a -> RAD s b -> RAD s c -> d
-disc3 f x y z = f (primal x) (primal y) (primal z)
-
 instance (Num a, Enum a) => Enum (RAD s a) where
     succ = unary_ succ 1
     pred = unary_ pred 1
     toEnum   = lift . toEnum
     fromEnum = disc1 fromEnum
+    -- the enumerated results vary with the lower bound and so their derivatives reflect that
     enumFrom a           = from a <$> disc1 enumFrom a
     enumFromTo a b       = from a <$> disc2 enumFromTo a b
+    -- these results vary with respect to both the lower bound and the delta between that and the second argument
     enumFromThen a b     = zipWith (fromBy a delta) [0..] $ disc2 enumFromThen a b where delta = b - a
     enumFromThenTo a b c = zipWith (fromBy a delta) [0..] $ disc3 enumFromThenTo a b c where delta = b - a
 
@@ -160,7 +173,7 @@ instance Num a => Num (RAD s a) where
     (-) = binary_ (-) 1 (-1)
     negate = unary_ negate (-1)
     (*) = binary (*) id id
-    -- TODO: not correct if the argument is complex
+    -- incorrect if the argument is complex
     abs = unary abs signum
     signum = lift . signum . primal
 
@@ -234,7 +247,7 @@ instance Floating a => Floating (RAD s a) where
     acosh   = unary acosh (recip . sqrt . (-1+) . (^2))
     atanh   = unary atanh (recip . (1-) . (^2))
 
--- back propagate along the tape.
+-- back propagate sensitivities along the tape.
 backprop :: (Ix t, Ord t, Num a) => (Vertex -> (Tape a t, t, [t])) -> STArray s t a -> Vertex -> ST s ()
 backprop vmap ss v = do
         case node of
@@ -252,10 +265,6 @@ backprop vmap ss v = do
     where 
         (node, i, _) = vmap v
 
-successors :: Tape a t -> [t]
-successors (U _ _ b)   = [b]
-successors (B _ _ _ b c) = [b,c]
-successors _ = []
 
 runTape :: Num a => (Int, Int) -> Reified.Graph (Tape a) -> Array Int a
 runTape vbounds (Reified.Graph xs start) = accumArray (+) 0 vbounds [ (id, sensitivities ! ix) | (ix, V _ id) <- xs ]
@@ -268,9 +277,12 @@ runTape vbounds (Reified.Graph xs start) = accumArray (+) 0 vbounds [ (id, sensi
                 backprop vmap ss
             return ss
         sbounds ((a,_):as) = foldl' (\(lo,hi) (b,_) -> (min lo b, max hi b)) (a,a) as
-        edgeSet (i, tape) = (tape, i, successors tape)
+        edgeSet (i, t) = (t, i, successors t)
         nonConst (_, C{}) = False
         nonConst _ = True
+        successors (U _ _ b)   = [b]
+        successors (B _ _ _ b c) = [b,c]
+        successors _ = []
 
 tape :: RAD s a -> Reified.Graph (Tape a) 
 tape = unsafePerformIO . reifyGraph
@@ -311,16 +323,23 @@ grad2 :: Num a => (forall s. [RAD s a] -> RAD s a) -> [a] -> (a, [a])
 grad2 f as = (primal r, elems $ runTape (1, length as) (tape r))
     where r = f (zipWith var as [1..])
 
+-- | The 'jacobian' function calcualtes the Jacobian of a
+-- nonscalar-to-nonscalar function, using m invocations of reverse AD,
+-- where m is the output dimensionality. When the output dimensionality is
+-- significantly greater than the input dimensionality you should use Numeric.FAD.jacobian instead.
 jacobian :: (Functor f, Num a) => (forall s. [RAD s a] -> f (RAD s a)) -> [a] -> f [a]
-jacobian f as = elems . runTape bounds . tape <$> f (zipWith var as [1..])
+jacobian f as = row <$> f (zipWith var as [1..])
     where bounds = (1, length as)
+          row a = elems . runTape bounds . tape
 
--- compute the result and jacobian
+-- | The 'jacobian2' function calcualtes both the result and the Jacobian of a
+-- nonscalar-to-nonscalar function, using m invocations of reverse AD,
+-- where m is the output dimensionality. 
+-- 'fmap snd' on the result will recover the result of 'jacobian'
 jacobian2 :: (Functor f, Num a) => (forall s. [RAD s a] -> f (RAD s a)) -> [a] -> f (a, [a])
 jacobian2 f as = row <$> f (zipWith var as [1..])
     where bounds = (1, length as)
           row a = (primal a, elems (runTape bounds (tape a)))
-
 
 -- | The 'zeroNewton' function finds a zero of a scalar function using
 -- Newton's method; its output is a stream of increasingly accurate
@@ -346,12 +365,24 @@ zeroNewton f x0 = iterate (\x -> let (y,y') = diff2UU f x in x - y/y') x0
 inverseNewton :: Fractional a => (forall s. RAD s a -> RAD s a) -> a -> a -> [a]
 inverseNewton f x0 y = zeroNewton (\x -> f x - lift y) x0
 
+-- | The 'fixedPointNewton' function find a fixedpoint of a scalar
+-- function using Newton's method; its output is a stream of
+-- increasingly accurate results.  (Modulo the usual caveats.)
 fixedPointNewton :: Fractional a => (forall s. RAD s a -> RAD s a) -> a -> [a]
 fixedPointNewton f = zeroNewton (\x -> f x - x)
 
+-- | The 'extremumNewton' function finds an extremum of a scalar
+-- function using Newton's method; produces a stream of increasingly
+-- accurate results.  (Modulo the usual caveats.)
 extremumNewton :: Fractional a => (forall s t. RAD t (RAD s a) -> RAD t (RAD s a)) -> a -> [a]
 extremumNewton f x0 = zeroNewton (diffUU f) x0
 
+-- | The 'argminNaiveGradient' function performs a multivariate
+-- optimization, based on the naive-gradient-descent in the file
+-- @stalingrad\/examples\/flow-tests\/pre-saddle-1a.vlad@ from the
+-- VLAD compiler Stalingrad sources.  Its output is a stream of
+-- increasingly accurate results.  (Modulo the usual caveats.)  
+-- This is /O(n)/ faster than Numeric.FAD.argminNaiveGradient
 argminNaiveGradient :: (Fractional a, Ord a) => (forall s. [RAD s a] -> RAD s a) -> [a] -> [[a]]
 argminNaiveGradient f x0 =
     let
@@ -373,6 +404,7 @@ argminNaiveGradient f x0 =
     in
       loop x0 (lowerFU f x0) (gf x0) 0.1 0
 
+{-
 lowerUU :: (forall s. RAD s a -> RAD s b) -> a -> b
 lowerUU f = primal . f . lift
 
@@ -381,6 +413,7 @@ lowerUF f = fmap primal . f . lift
 
 lowerFF :: (Functor f, Functor g) => (forall s. f (RAD s a) -> g (RAD s b)) -> f a -> g b
 lowerFF f = fmap primal . f . fmap lift
+-}
 
 lowerFU :: Functor f => (forall s. f (RAD s a) -> RAD s b) -> f a -> b
 lowerFU f = primal . f . fmap lift
