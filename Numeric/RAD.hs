@@ -55,9 +55,7 @@ import Data.List (foldl')
 import Data.Array.ST
 import Data.Array
 import Data.Ix
-import Data.Map (Map)
 import Text.Show
-import qualified Data.Map as Map
 import Data.Graph (graphFromEdges', topSort, Vertex)
 import Data.Reify (reifyGraph, MuRef(..))
 import qualified Data.Reify.Graph as Reified
@@ -293,24 +291,37 @@ d r = runTape (0,0) (tape r) ! 0
 d2 :: Num a => RAD s a -> (a,a)
 d2 r = (primal r, d r)
 
+
+-- | The 'diffUU' function calculates the first derivative of a
+-- scalar-to-scalar function.
 diffUU :: Num a => (forall s. RAD s a -> RAD s a) -> a -> a
 diffUU f a = d $ f (var a 0)
 
+
+-- | The 'diffUF' function calculates the first derivative of
+-- scalar-to-nonscalar function.
 diffUF :: (Functor f, Num a) => (forall s. RAD s a -> f (RAD s a)) -> a -> f a
 diffUF f a = d <$> f (var a 0)
 
 -- diffMU :: Num a => (forall s. [RAD s a] -> RAD s a) -> [a] -> [a] -> a
 -- TODO: finish up diffMU and their ilk
 
+
+-- | The 'diff2UU' function calculates the value and derivative, as a
+-- pair, of a scalar-to-scalar function.
 diff2UU :: Num a => (forall s. RAD s a -> RAD s a) -> a -> (a, a)
 diff2UU f a = d2 $ f (var a 0)
 
+-- | Note that the signature differs from that used in Numeric.FAD, because while you can always
+-- 'unzip' an arbitrary functor, not all functors can be zipped.
 diff2UF :: (Functor f, Num a) => (forall s. RAD s a -> f (RAD s a)) -> a -> f (a, a)
 diff2UF f a = d2 <$> f (var a 0)
 
+-- | The 'diff' function is a synonym for 'diffUU'.
 diff :: Num a => (forall s. RAD s a -> RAD s a) -> a -> a
 diff = diffUU 
 
+-- | The 'diff2' function is a synonym for 'diff2UU'.
 diff2 :: Num a => (forall s. RAD s a -> RAD s a) -> a -> (a, a)
 diff2 = diff2UU
 
@@ -326,11 +337,11 @@ grad2 f as = (primal r, elems $ runTape (1, length as) (tape r))
 -- | The 'jacobian' function calcualtes the Jacobian of a
 -- nonscalar-to-nonscalar function, using m invocations of reverse AD,
 -- where m is the output dimensionality. When the output dimensionality is
--- significantly greater than the input dimensionality you should use Numeric.FAD.jacobian instead.
+-- significantly greater than the input dimensionality you should use 'Numeric.FAD.jacobian' instead.
 jacobian :: (Functor f, Num a) => (forall s. [RAD s a] -> f (RAD s a)) -> [a] -> f [a]
 jacobian f as = row <$> f (zipWith var as [1..])
     where bounds = (1, length as)
-          row a = elems . runTape bounds . tape
+          row = elems . runTape bounds . tape
 
 -- | The 'jacobian2' function calcualtes both the result and the Jacobian of a
 -- nonscalar-to-nonscalar function, using m invocations of reverse AD,
@@ -349,7 +360,7 @@ jacobian2 f as = row <$> f (zipWith var as [1..])
 --  @take 10 $ zeroNewton (\\x->x^2-4) 1  -- converge to 2.0@
 --
 -- TEST CASE
---  :module Data.Complex Numeric.FAD
+--  :module Data.Complex Numeric.RAD
 --  @take 10 $ zeroNewton ((+1).(^2)) (1 :+ 1)  -- converge to (0 :+ 1)@
 --
 zeroNewton :: Fractional a => (forall s. RAD s a -> RAD s a) -> a -> [a]
@@ -382,7 +393,7 @@ extremumNewton f x0 = zeroNewton (diffUU f) x0
 -- @stalingrad\/examples\/flow-tests\/pre-saddle-1a.vlad@ from the
 -- VLAD compiler Stalingrad sources.  Its output is a stream of
 -- increasingly accurate results.  (Modulo the usual caveats.)  
--- This is /O(n)/ faster than Numeric.FAD.argminNaiveGradient
+-- This is /O(n)/ faster than 'Numeric.FAD.argminNaiveGradient'
 argminNaiveGradient :: (Fractional a, Ord a) => (forall s. [RAD s a] -> RAD s a) -> [a] -> [[a]]
 argminNaiveGradient f x0 =
     let
