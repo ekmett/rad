@@ -229,7 +229,7 @@ instance Fractional a => Fractional (RAD s a) where
 
 instance Floating a => Floating (RAD s a) where
     pi      = lift pi
-    exp     = unary exp id
+    exp     = unary exp exp
     log     = unary log recip
     sqrt    = unary sqrt (recip . (2*) . sqrt)
     RAD (C x) ** RAD (C y) = lift (x ** y)
