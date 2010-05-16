@@ -48,9 +48,10 @@ module Numeric.RAD
     , argminNaiveGradient
     ) where
 
+import Prelude hiding (mapM)
 import Control.Applicative (Applicative(..),(<$>))
-import Control.Monad (forM_)
 import Control.Monad.ST
+import Control.Monad (forM_)
 import Data.List (foldl')
 import Data.Array.ST
 import Data.Array
@@ -59,6 +60,7 @@ import Text.Show
 import Data.Graph (graphFromEdges', topSort, Vertex)
 import Data.Reify (reifyGraph, MuRef(..))
 import qualified Data.Reify.Graph as Reified
+import Data.Traversable (Traversable, mapM)
 import System.IO.Unsafe (unsafePerformIO)
 
 newtype RAD s a = RAD (Tape a (RAD s a))
@@ -264,9 +266,10 @@ backprop vmap ss v = do
         (node, i, _) = vmap v
 
 
-runTape :: Num a => (Int, Int) -> Reified.Graph (Tape a) -> Array Int a
-runTape vbounds (Reified.Graph xs start) = accumArray (+) 0 vbounds [ (id, sensitivities ! ix) | (ix, V _ id) <- xs ]
+runTape :: Num a => (Int, Int) -> RAD s a -> Array Int a 
+runTape vbounds tape = accumArray (+) 0 vbounds [ (id, sensitivities ! ix) | (ix, V _ id) <- xs ]
     where
+        Reified.Graph xs start = unsafePerformIO $ reifyGraph tape
         (g, vmap) = graphFromEdges' (edgeSet <$> filter nonConst xs)
         sensitivities = runSTArray $ do
             ss <- newArray (sbounds xs) 0
@@ -282,11 +285,8 @@ runTape vbounds (Reified.Graph xs start) = accumArray (+) 0 vbounds [ (id, sensi
         successors (B _ _ _ b c) = [b,c]
         successors _ = []
 
-tape :: RAD s a -> Reified.Graph (Tape a) 
-tape = unsafePerformIO . reifyGraph
-
 d :: Num a => RAD s a -> a
-d r = runTape (0,0) (tape r) ! 0 
+d r = runTape (0,0) r ! 0 
 
 d2 :: Num a => RAD s a -> (a,a)
 d2 r = (primal r, d r)
@@ -306,6 +306,21 @@ diffUF f a = d <$> f (var a 0)
 -- diffMU :: Num a => (forall s. [RAD s a] -> RAD s a) -> [a] -> [a] -> a
 -- TODO: finish up diffMU and their ilk
 
+-- avoid dependency on MTL
+newtype S a = S { runS :: Int -> (a,Int) } 
+
+instance Monad S where
+    return a = S (\s -> (a,s))
+    S g >>= f = S (\s -> let (a,s') = g s in runS (f a) s')
+    
+bind :: Traversable f => f a -> (f (RAD s a), (Int,Int))
+bind xs = (r,(0,s)) 
+    where 
+        (r,s) = runS (mapM freshVar xs) 0
+        freshVar a = S (\s -> let s' = s + 1 in s' `seq` (RAD (V a s), s'))
+
+unbind :: Functor f => f (RAD s b) -> Array Int a -> f a 
+unbind xs ys = fmap (\(RAD (V _ i)) -> ys ! i) xs
 
 -- | The 'diff2UU' function calculates the value and derivative, as a
 -- pair, of a scalar-to-scalar function.
@@ -326,31 +341,32 @@ diff2 :: Num a => (forall s. RAD s a -> RAD s a) -> a -> (a, a)
 diff2 = diff2UU
 
 -- requires the input list to be finite in length
-grad :: Num a => (forall s. [RAD s a] -> RAD s a) -> [a] -> [a]
-grad f as = elems $ runTape (1, length as) $ tape $ f $ zipWith var as [1..]
+grad :: (Traversable f, Num a) => (forall s. f (RAD s a) -> RAD s a) -> f a -> f a
+grad f as = unbind s (runTape bounds $ f s)
+    where (s,bounds) = bind as
 
 -- compute the primal and gradient
-grad2 :: Num a => (forall s. [RAD s a] -> RAD s a) -> [a] -> (a, [a])
-grad2 f as = (primal r, elems $ runTape (1, length as) (tape r))
-    where r = f (zipWith var as [1..])
+grad2 :: (Traversable f, Num a) => (forall s. f (RAD s a) -> RAD s a) -> f a -> (a, f a)
+grad2 f as = (primal r, unbind s (runTape bounds r))
+    where (s,bounds) = bind as
+          r = f s
 
 -- | The 'jacobian' function calcualtes the Jacobian of a
 -- nonscalar-to-nonscalar function, using m invocations of reverse AD,
 -- where m is the output dimensionality. When the output dimensionality is
 -- significantly greater than the input dimensionality you should use 'Numeric.FAD.jacobian' instead.
-jacobian :: (Functor f, Num a) => (forall s. [RAD s a] -> f (RAD s a)) -> [a] -> f [a]
-jacobian f as = row <$> f (zipWith var as [1..])
-    where bounds = (1, length as)
-          row = elems . runTape bounds . tape
+jacobian :: (Traversable f, Functor g, Num a) => (forall s. f (RAD s a) -> g (RAD s a)) -> f a -> g (f a)
+jacobian f as = unbind s . runTape bounds <$> f s
+    where (s,bounds) = bind as
 
 -- | The 'jacobian2' function calcualtes both the result and the Jacobian of a
 -- nonscalar-to-nonscalar function, using m invocations of reverse AD,
 -- where m is the output dimensionality. 
 -- 'fmap snd' on the result will recover the result of 'jacobian'
-jacobian2 :: (Functor f, Num a) => (forall s. [RAD s a] -> f (RAD s a)) -> [a] -> f (a, [a])
-jacobian2 f as = row <$> f (zipWith var as [1..])
-    where bounds = (1, length as)
-          row a = (primal a, elems (runTape bounds (tape a)))
+jacobian2 :: (Traversable f, Functor g, Num a) => (forall s. f (RAD s a) -> g (RAD s a)) -> f a -> g (a, f a)
+jacobian2 f as = row <$> f s
+    where (s,bounds) = bind as
+          row a = (primal a, unbind s (runTape bounds a))
 
 -- | The 'zeroNewton' function finds a zero of a scalar function using
 -- Newton's method; its output is a stream of increasingly accurate

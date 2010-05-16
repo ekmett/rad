@@ -18,4 +18,4 @@ Build-Depends:       base,
                      containers >= 0.2 && < 0.3,
                      array >= 0.2 && < 0.3
 Exposed-Modules:     Numeric.RAD
-Extra-Files:         TODO
+Extra-Source-Files:  TODO
