@@ -279,7 +279,7 @@ runTape vbounds tape = accumArray (+) 0 vbounds [ (id, sensitivities ! ix) | (ix
             return ss
         sbounds ((a,_):as) = foldl' (\(lo,hi) (b,_) -> (min lo b, max hi b)) (a,a) as
         edgeSet (i, t) = (t, i, successors t)
-        nonConst (_, C{}) = False
+        nonConst (_, Literal{}) = False
         nonConst _ = True
         successors (Unary _ _ b) = [b]
         successors (Binary _ _ _ b c) = [b,c]
@@ -444,7 +444,7 @@ argminNaiveGradient f x0 =
                                  then loop x1 fx1 gx1 (eta*2) 0
                                  else loop x1 fx1 gx1 eta (i+1))
     in
-      loop x0 (lowerFUnary f x0) (gf x0) 0.1 0
+      loop x0 (lowerFU f x0) (gf x0) 0.1 0
 
 {-
 lowerUU :: (forall s. RAD s a -> RAD s b) -> a -> b
