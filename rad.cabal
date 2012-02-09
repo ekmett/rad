@@ -1,5 +1,5 @@
 Name:                rad
-Version:             0.1.6.1
+Version:             0.1.6.2
 License:             BSD3
 License-File:        LICENSE
 Copyright:           Edward Kmett 2010
@@ -11,11 +11,13 @@ Synopsis:            Reverse Automatic Differentiation.
 Description:
     Reverse-Mode Automatic Differentiation via overloading.
     Existential type \"branding\" is used to prevent sensitivity confusion.
+    .
+    Deprecated: Use 'ad' instead.
 Category:            Math
 Build-Type:          Simple
 Build-Depends:       base >= 4 && < 5,
-                     data-reify >= 0.5 && < 0.7, 
+                     data-reify >= 0.5 && < 0.7,
                      containers >= 0.2 && < 0.5,
-                     array >= 0.2 && < 0.4
+                     array >= 0.2 && < 0.5
 Exposed-Modules:     Numeric.RAD
 Extra-Source-Files:  TODO
